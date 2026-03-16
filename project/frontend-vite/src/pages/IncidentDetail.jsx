@@ -6,11 +6,11 @@ import axios from 'axios';
 function IncidentDetail() {
   const { id } = useParams();
   const [incident, setIncident] = useState(null);
-  const BASE_URL = "https://e6c3-103-248-210-174.ngrok-free.app";
+  const BASE_URL = "https://final-year-project-okg4.onrender.com";
   useEffect(() => {
     const fetchIncident = async () => {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`/api/incidents/${id}`, {
+      const res = await axios.get(`https://final-year-project-okg4.onrender.com/api/incidents/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setIncident(res.data);
