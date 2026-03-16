@@ -457,13 +457,13 @@ const PORT = 8080;
 // ===============================
 // 🔐 CONFIG
 // ===============================
-const GEMINI_KEY = "AIzaSyBqtjDjEon9Xd8HQgN5ye8XUO7qWDNlr-Q";
+const GEMINI_KEY =  process.env.GEMINI_KEY ;
 // const Model = model.save('violence_classifier.h5');
 
 
-const TWILIO_ACCOUNT_SID = "AC2f01290aa88ec6afd8f46e18d9634bf5";
-const TWILIO_AUTH_TOKEN = "1690287377290ee3c87d9ba4e12b5f7e";
-const TWILIO_PHONE_NUMBER = "+14155238886";
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID  ;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN  ;
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER ;
 
 const HIGHER_AUTHORITIES = ["+919912021754"];
 
