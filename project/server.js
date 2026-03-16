@@ -441,7 +441,7 @@ const __dirname = path.dirname(__filename);
 // 🚀 APP INIT
 // ===============================
 const app = express();
-const PORT = 8080;
+ 
 
 // ===============================
 // 🗄️ MONGODB
