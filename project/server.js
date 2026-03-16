@@ -592,10 +592,10 @@ Return ONLY valid JSON:
       report,
       pdf: `/reports/${report.id}.pdf`,
     });
-  } catch (err) {
-    console.error("Analyze error:", err.message);
-    res.status(500).json({ error: "AI analysis failed" });
-  }
+  }catch (err) {
+  console.error("Analyze error FULL:", err.response?.data || err.message);
+  res.status(500).json({ error: "AI analysis failed", details: err.response?.data || err.message });
+}
 });
 
 // ===============================
