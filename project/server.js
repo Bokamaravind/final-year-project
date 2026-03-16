@@ -524,78 +524,136 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
   try {
     let imageBuffer, mimeType;
 
+    // ===============================
+    // 📷 GET IMAGE
+    // ===============================
     if (req.file) {
       imageBuffer = fs.readFileSync(req.file.path);
       mimeType = req.file.mimetype;
-    } else if (req.body.imageBase64) {
-      const match = req.body.imageBase64.match(
-        /^data:(image\/\w+);base64,(.*)$/
-      );
-      if (!match) return res.status(400).json({ error: "Invalid base64 image" });
+    } 
+    else if (req.body.imageBase64) {
+      const match = req.body.imageBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+
+      if (!match) {
+        return res.status(400).json({ error: "Invalid base64 image format" });
+      }
 
       mimeType = match[1];
       imageBuffer = Buffer.from(match[2], "base64");
-    } else {
+    } 
+    else {
       return res.status(400).json({ error: "No image provided" });
     }
 
     const base64Image = imageBuffer.toString("base64");
 
+    // ===============================
+    // 🤖 PROMPT
+    // ===============================
     const prompt = `
-You are a professional surveillance analyst.
-Analyze this image for violence, fights, weapons, or physical attacks.
+You are an AI surveillance system.
+
+Analyze the image for:
+- violence
+- fighting
+- weapons
+- dangerous situations
 
 Return ONLY valid JSON:
+
 {
-  "classification": "NORMAL or SUSPICIOUS",
-  "threat_type": "None | Physical Violence | Weapon",
-  "confidence_percent": 85,
-  "visual_indicators": ["indicator1", "indicator2"],
-  "full_explanation": "Detailed explanation"
+ "classification": "NORMAL or SUSPICIOUS",
+ "threat_type": "None | Physical Violence | Weapon",
+ "confidence_percent": 0-100,
+ "visual_indicators": ["indicator1","indicator2"],
+ "full_explanation": "Detailed explanation"
 }
 `;
 
-    const aiResp = await axios.post(GEMINI_URL, {
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                mimeType,
-                data: base64Image,
-              },
-            },
-          ],
-        },
-      ],
-    });
+    // ===============================
+    // 🤖 GEMINI REQUEST
+    // ===============================
+    const aiResp = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+      {
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Image
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json"
+        }
+      }
+    );
 
-    const raw =
-      aiResp?.data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-    const clean = raw.replace(/```json|```/g, "").trim();
-    const analysis = JSON.parse(clean);
+    // ===============================
+    // 📊 EXTRACT AI RESPONSE
+    // ===============================
+    let raw =
+      aiResp?.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
+    raw = raw.replace(/```json|```/g, "").trim();
+
+    let analysis;
+
+    try {
+      analysis = JSON.parse(raw);
+    } catch {
+      console.log("⚠ Gemini returned non JSON:", raw);
+
+      analysis = {
+        classification: "NORMAL",
+        threat_type: "Unknown",
+        confidence_percent: 50,
+        visual_indicators: [],
+        full_explanation: raw
+      };
+    }
+
+    // ===============================
+    // 📄 BUILD REPORT
+    // ===============================
     const report = {
       id: uuidv4(),
       time: new Date().toISOString(),
-      status: analysis.classification,
-      confidence: analysis.confidence_percent,
-      explanation: analysis.full_explanation,
+      status: analysis.classification || "NORMAL",
+      confidence: analysis.confidence_percent || 50,
+      explanation: analysis.full_explanation || "No explanation"
     };
 
     const pdfPath = path.join(REPORTS_DIR, `${report.id}.pdf`);
+
     await generatePdf(report, imageBuffer, pdfPath);
 
+    // ===============================
+    // ✅ RESPONSE
+    // ===============================
     res.json({
       success: true,
       report,
-      pdf: `/reports/${report.id}.pdf`,
+      pdf: `/reports/${report.id}.pdf`
     });
-  }catch (err) {
-  console.error("Analyze error FULL:", err.response?.data || err.message);
-  res.status(500).json({ error: "AI analysis failed", details: err.response?.data || err.message });
-}
+
+  } catch (err) {
+    console.error("🔥 Gemini API Error:", err.response?.data || err.message);
+
+    return res.status(500).json({
+      error: "AI analysis failed",
+      details: err.response?.data || err.message
+    });
+  }
 });
 
 // ===============================
