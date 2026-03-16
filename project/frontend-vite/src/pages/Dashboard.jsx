@@ -10,7 +10,7 @@
 //     const fetchIncidents = async () => {
 //       try {
 //         const token = localStorage.getItem('token');
-//         const res = await axios.get('/api/incidents', {
+//         const res = await axios.get('https://final-year-project-okg4.onrender.com/api/incidents', {
 //           headers: { Authorization: `Bearer ${token}` }
 //         });
 //         setIncidents(res.data);
@@ -146,13 +146,13 @@ import { Link } from "react-router-dom";
 function Dashboard() {
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const BASE_URL = "https://e6c3-103-248-210-174.ngrok-free.app";
+  const BASE_URL = "https://final-year-project-okg4.onrender.com";
 
   useEffect(() => {
     const fetchIncidents = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await axios.get("/api/incidents", {
+        const res = await axios.get("https://final-year-project-okg4.onrender.com/api/incidents", {
           headers: { Authorization: `Bearer ${token}` },
         });
         setIncidents(res.data);
