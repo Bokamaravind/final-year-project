@@ -847,7 +847,7 @@ https://www.google.com/maps?q=${saved.latitude},${saved.longitude}`;
     fs.writeFileSync(filePath, imageBuffer);
 
     const publicBaseUrl =
-      process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
+     `https://final-year-project-okg4.onrender.com`;
 
      const publicImageUrl = `${publicBaseUrl}/uploads/${fileName}`;
   const cleanImageUrl = publicImageUrl.replace(/["']/g, "");
@@ -858,7 +858,7 @@ https://www.google.com/maps?q=${saved.latitude},${saved.longitude}`;
     // 🤖 STEP 3: Analyze Image
     // ===============================
     const analyzeResp = await axios.post(
-      `http://localhost:${PORT}/analyze`,
+      `https://final-year-project-okg4.onrender.com/analyze`,
       {
         imageBase64: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
       }
