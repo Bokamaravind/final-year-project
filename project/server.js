@@ -457,7 +457,7 @@ const app = express();
 // ===============================
 // 🔐 CONFIG
 // ===============================
-const GEMINI_KEY =  process.env.GEMINI_KEY ;
+const GEMINI_KEY =  process.env.GEMINI_KEY || 'AIzaSyBqtjDjEon9Xd8HQgN5ye8XUO7qWDNlr-Q' ;
 // const Model = model.save('violence_classifier.h5');
 
 
