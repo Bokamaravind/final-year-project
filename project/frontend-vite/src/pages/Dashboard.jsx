@@ -294,7 +294,7 @@ function Dashboard() {
                           onClick={async () => {
                             const token = localStorage.getItem("token");
                             await axios.patch(
-                              `/api/incidents/${incident._id}/action`,
+                              `https://final-year-project-okg4.onrender.com/api/incidents/${incident._id}/action`,
                               {},
                               {
                                 headers: {
@@ -325,7 +325,7 @@ function Dashboard() {
                           ) {
                             const token = localStorage.getItem("token");
                             await axios.delete(
-                              `/api/incidents/${incident._id}`,
+                              `https://final-year-project-okg4.onrender.com/api/incidents/${incident._id}`,
                               {
                                 headers: {
                                   Authorization: `Bearer ${token}`,
