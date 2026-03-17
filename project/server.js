@@ -417,10 +417,6 @@ import PDFDocument from "pdfkit";
 import { v4 as uuidv4 } from "uuid";
 import cors from "cors";
 import twilioLib from "twilio";
- 
-
-
- 
 
 import { fileURLToPath } from "url";
 
@@ -441,36 +437,17 @@ const __dirname = path.dirname(__filename);
 // 🚀 APP INIT
 // ===============================
 const app = express();
- 
-
-// ===============================
-// 🗄️ MONGODB
-// ===============================
-// mongoose
-//   .connect(
-//     process.env.MONGO_URI ||
-//       "mongodb+srv://bokamaravind_07:h6O9pI0zPx536SUD@cluster0.mfyvep3.mongodb.net/reporting?retryWrites=true&w=majority&appName=Cluster0"
-//   )
-//   .then(() => console.log("✅ MongoDB Connected"))
-//   .catch((err) => console.error(err));
 
 // ===============================
 // 🔐 CONFIG
 // ===============================
-const GEMINI_KEY =  process.env.GEMINI_KEY || 'AIzaSyBqtjDjEon9Xd8HQgN5ye8XUO7qWDNlr-Q' ;
-// const Model = model.save('violence_classifier.h5');
+const GEMINI_KEY = process.env.GEMINI_KEY || "AIzaSyBqtjDjEon9Xd8HQgN5ye8XUO7qWDNlr-Q";
 
-
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID  ;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN  ;
-const TWILIO_PHONE_NUMBER = +14155238886 ;
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_PHONE_NUMBER = +14155238886;
 
 const HIGHER_AUTHORITIES = ["+919912021754"];
-
-// ===============================
-// 🤖 GEMINI
-// ===============================
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
 
 // ===============================
 // 📁 DIRECTORIES
@@ -501,11 +478,12 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-
+// ===============================
 // ROUTES
 // ===============================
 app.use("/api/admin", adminRoutes);
 app.use("/api/incidents", incidentRoutes);
+
 // ===============================
 // 🟢 HEALTH
 // ===============================
@@ -518,39 +496,13 @@ app.get("/health", (req, res) => {
 });
 
 // ===============================
-// 🔍 ANALYZE IMAGE
+// 🤖 SHARED ANALYSIS FUNCTION
+// (Called directly — no internal HTTP request)
 // ===============================
-app.post("/analyze", upload.single("image"), async (req, res) => {
-  try {
-    let imageBuffer, mimeType;
+async function analyzeImageBuffer(imageBuffer, mimeType) {
+  const base64Image = imageBuffer.toString("base64");
 
-    // ===============================
-    // 📷 GET IMAGE
-    // ===============================
-    if (req.file) {
-      imageBuffer = fs.readFileSync(req.file.path);
-      mimeType = req.file.mimetype;
-    } 
-    else if (req.body.imageBase64) {
-      const match = req.body.imageBase64.match(/^data:(image\/\w+);base64,(.*)$/);
-
-      if (!match) {
-        return res.status(400).json({ error: "Invalid base64 image format" });
-      }
-
-      mimeType = match[1];
-      imageBuffer = Buffer.from(match[2], "base64");
-    } 
-    else {
-      return res.status(400).json({ error: "No image provided" });
-    }
-
-    const base64Image = imageBuffer.toString("base64");
-
-    // ===============================
-    // 🤖 PROMPT
-    // ===============================
-    const prompt = `
+  const prompt = `
 You are an AI surveillance system.
 
 Analyze the image for:
@@ -570,94 +522,106 @@ Return ONLY valid JSON:
 }
 `;
 
-    // ===============================
-    // 🤖 GEMINI REQUEST
-    // ===============================
-    const aiResp = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-      {
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: mimeType,
-                  data: base64Image
-                }
-              }
-            ]
-          }
-        ]
-      },
-      {
-        headers: {
-          "Content-Type": "application/json"
-        }
+  const aiResp = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+    {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Image,
+              },
+            },
+          ],
+        },
+      ],
+    },
+    {
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+
+  let raw = aiResp?.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  raw = raw.replace(/```json|```/g, "").trim();
+
+  let analysis;
+  try {
+    analysis = JSON.parse(raw);
+  } catch {
+    console.log("⚠ Gemini returned non-JSON:", raw);
+    analysis = {
+      classification: "NORMAL",
+      threat_type: "Unknown",
+      confidence_percent: 50,
+      visual_indicators: [],
+      full_explanation: raw,
+    };
+  }
+
+  const report = {
+    id: uuidv4(),
+    time: new Date().toISOString(),
+    status: analysis.classification || "NORMAL",
+    confidence: analysis.confidence_percent || 50,
+    explanation: analysis.full_explanation || "No explanation",
+  };
+
+  const pdfPath = path.join(REPORTS_DIR, `${report.id}.pdf`);
+  await generatePdf(report, imageBuffer, pdfPath);
+
+  return report;
+}
+
+// ===============================
+// 🔍 ANALYZE IMAGE ENDPOINT
+// ===============================
+app.post("/analyze", upload.single("image"), async (req, res) => {
+  try {
+    let imageBuffer, mimeType;
+
+    // ── Get Image ──
+    if (req.file) {
+      imageBuffer = fs.readFileSync(req.file.path);
+      mimeType = req.file.mimetype;
+    } else if (req.body.imageBase64) {
+      const match = req.body.imageBase64.match(
+        /^data:(image\/\w+);base64,(.*)$/
+      );
+
+      if (!match) {
+        return res.status(400).json({ error: "Invalid base64 image format" });
       }
-    );
 
-    // ===============================
-    // 📊 EXTRACT AI RESPONSE
-    // ===============================
-    let raw =
-      aiResp?.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-    raw = raw.replace(/```json|```/g, "").trim();
-
-    let analysis;
-
-    try {
-      analysis = JSON.parse(raw);
-    } catch {
-      console.log("⚠ Gemini returned non JSON:", raw);
-
-      analysis = {
-        classification: "NORMAL",
-        threat_type: "Unknown",
-        confidence_percent: 50,
-        visual_indicators: [],
-        full_explanation: raw
-      };
+      mimeType = match[1];
+      imageBuffer = Buffer.from(match[2], "base64");
+    } else {
+      return res.status(400).json({ error: "No image provided" });
     }
 
-    // ===============================
-    // 📄 BUILD REPORT
-    // ===============================
-    const report = {
-      id: uuidv4(),
-      time: new Date().toISOString(),
-      status: analysis.classification || "NORMAL",
-      confidence: analysis.confidence_percent || 50,
-      explanation: analysis.full_explanation || "No explanation"
-    };
+    // ── Call shared function directly (no HTTP) ──
+    const report = await analyzeImageBuffer(imageBuffer, mimeType);
 
-    const pdfPath = path.join(REPORTS_DIR, `${report.id}.pdf`);
-
-    await generatePdf(report, imageBuffer, pdfPath);
-
-    // ===============================
-    // ✅ RESPONSE
-    // ===============================
     res.json({
       success: true,
       report,
-      pdf: `/reports/${report.id}.pdf`
+      pdf: `/reports/${report.id}.pdf`,
     });
-
   } catch (err) {
-    console.error("🔥 Gemini API Error:", err.response?.data || err.message);
+    console.error("🔥 Analyze Error:", err.response?.data || err.message);
 
     return res.status(500).json({
       error: "AI analysis failed",
-      details: err.response?.data || err.message
+      details: err.response?.data || err.message,
     });
   }
 });
 
 // ===============================
-// 📄 PDF
+// 📄 PDF GENERATOR
 // ===============================
 function generatePdf(report, imageBuffer, outPath) {
   return new Promise((resolve) => {
@@ -687,7 +651,7 @@ function generatePdf(report, imageBuffer, outPath) {
 }
 
 // ===============================
-// 📲 TWILIO
+// 📲 TWILIO CLIENT
 // ===============================
 const twilio = twilioLib(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 const lastKnownLocation = {};
@@ -695,157 +659,13 @@ const lastKnownLocation = {};
 // ===============================
 // 📲 TWILIO WEBHOOK
 // ===============================
-// app.post("/twilio-webhook", async (req, res) => {
-//   try {
-
-     
-
-//     const from = req.body.From;
-//     const mediaUrl = req.body.MediaUrl0;
-
-//     const { Latitude, Longitude, Address } = req.body;
-
-//     if (Latitude && Longitude) {
-//       lastKnownLocation[from] = {
-//         latitude: Latitude,
-//         longitude: Longitude,
-//         address: Address,
-//         timestamp: Date.now(),
-//       };
-
-//       return res.send(`
-//         <Response>
-//           <Message>📍 Location received. Now send the image.</Message>
-//         </Response>
-//       `);
-//     }
-
-//     if (!mediaUrl) {
-//       return res.send(`
-//         <Response>
-//           <Message>⚠️ Share live location before image.</Message>
-//         </Response>
-//       `);
-//     }
-
-//     const saved = lastKnownLocation[from];
-//     if (!saved || Date.now() - saved.timestamp > 10 * 60 * 1000) {
-//       delete lastKnownLocation[from];
-//       return res.send(`
-//         <Response>
-//           <Message>⚠️ Location expired. Send again.</Message>
-//         </Response>
-//       `);
-//     }
-
-//     const locationText = `📍 Live Location:
-// https://www.google.com/maps?q=${saved.latitude},${saved.longitude}`;
-
-//     const imgResp = await axios.get(mediaUrl, {
-//       responseType: "arraybuffer",
-//       auth: {
-//         username: TWILIO_ACCOUNT_SID,
-//         password: TWILIO_AUTH_TOKEN,
-//       },
-//     });
-
-//     const mimeType = imgResp.headers["content-type"];
-//     const imageBuffer = Buffer.from(imgResp.data);
-
-//     const fileName = `${Date.now()}-${uuidv4()}.jpg`;
-//     const filePath = path.join(UPLOAD_DIR, fileName);
-//     fs.writeFileSync(filePath, imageBuffer);
-
-//     const publicBaseUrl =
-//       process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
-//     const publicImageUrl = `${publicBaseUrl}/uploads/${fileName}`;
-//     const cleanImageUrl = publicImageUrl.replace(/["']/g, "");
-//     const imageUrlForDb = `/uploads/${fileName}`;
-//     const cleanImageUrlForDb = imageUrlForDb.replace(/["']/g, "");
-//     const analyzeResp = await axios.post(
-//       `http://localhost:${PORT}/analyze`,
-//       {
-//         imageBase64: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
-//       }
-//     );
-
-//     const report = analyzeResp.data.report;
- 
-//       console.log("[Incident] Attempting to insert:", {
-//         incidentId: report.id,
-//         from: from,
-//         image: cleanImageUrlForDb,
-//         pdf: `/reports/${report.id}.pdf`,
-//         status: report.status,
-//         confidence: report.confidence,
-//         explanation: report.explanation,
-//         location: {
-//           latitude: saved.latitude,
-//           longitude: saved.longitude,
-//         },
-//         notifiedAuthorities: HIGHER_AUTHORITIES,
-//         reportedAt: new Date(),
-//       });
-//       const insertedIncident = await Incident.create({
-//         incidentId: report.id,
-//         from: from,
-//         image: cleanImageUrlForDb,
-//         pdf: `/reports/${report.id}.pdf`,
-//         status: report.status,
-//         confidence: report.confidence,
-//         explanation: report.explanation,
-//         location: {
-//           latitude: saved.latitude,
-//           longitude: saved.longitude,
-//         },
-//         notifiedAuthorities: HIGHER_AUTHORITIES,
-//         reportedAt: new Date(),
-//       });
-//       console.log("[Incident] Inserted:", insertedIncident);
-
-//     if (report.status === "SUSPICIOUS") {
-//       for (const number of HIGHER_AUTHORITIES) {
-//         await twilio.messages.create({
-//           from: `whatsapp:${TWILIO_PHONE_NUMBER}`,
-//           to: `whatsapp:${number}`,
-//           body: `🚨 VIOLENCE DETECTED
-// From: ${from}
-// Confidence: ${report.confidence}%
-
-// ${locationText}
-
-// ${report.explanation}`,
-//           mediaUrl: [publicImageUrl],
-//         });
-//       }
-//     }
-
-//     res.send(`
-//       <Response>
-//         <Message>🚨 Suspicious activity detected. Authorities have been notified ✅</Message>
-//       </Response>
-//     `);
-
-    
-//   } catch (err) {
-//     console.error("Twilio error:", err.message);
-//     res.send(`
-//       <Response>
-//         <Message>Error processing media</Message>
-//       </Response>
-//     `);
-//   }
-// });
-
 app.post("/twilio-webhook", async (req, res) => {
   try {
     const from = req.body.From;
     const mediaUrl = req.body.MediaUrl0;
     const { Latitude, Longitude, Address } = req.body;
 
-    // ===============================
-    // 📍 STEP 1: Save Location First
-    // ===============================
+    // ── Step 1: Save Location ──
     if (Latitude && Longitude) {
       lastKnownLocation[from] = {
         latitude: Latitude,
@@ -861,9 +681,7 @@ app.post("/twilio-webhook", async (req, res) => {
       `);
     }
 
-    // ===============================
-    // ⚠️ If image sent without location
-    // ===============================
+    // ── No image sent ──
     if (!mediaUrl) {
       return res.send(`
         <Response>
@@ -872,6 +690,7 @@ app.post("/twilio-webhook", async (req, res) => {
       `);
     }
 
+    // ── Check saved location ──
     const saved = lastKnownLocation[from];
 
     if (!saved || Date.now() - saved.timestamp > 10 * 60 * 1000) {
@@ -883,12 +702,9 @@ app.post("/twilio-webhook", async (req, res) => {
       `);
     }
 
-    const locationText = `📍 Live Location:
-https://www.google.com/maps?q=${saved.latitude},${saved.longitude}`;
+    const locationText = `📍 Live Location:\nhttps://www.google.com/maps?q=${saved.latitude},${saved.longitude}`;
 
-    // ===============================
-    // 📥 STEP 2: Download Image from Twilio
-    // ===============================
+    // ── Step 2: Download Image from Twilio ──
     const imgResp = await axios.get(mediaUrl, {
       responseType: "arraybuffer",
       auth: {
@@ -904,76 +720,56 @@ https://www.google.com/maps?q=${saved.latitude},${saved.longitude}`;
     const filePath = path.join(UPLOAD_DIR, fileName);
     fs.writeFileSync(filePath, imageBuffer);
 
-    const publicBaseUrl =
-     `https://final-year-project-okg4.onrender.com`;
-
-     const publicImageUrl = `${publicBaseUrl}/uploads/${fileName}`;
-  const cleanImageUrl = publicImageUrl.replace(/["']/g, "");
+    const publicBaseUrl = `https://final-year-project-okg4.onrender.com`;
+    const publicImageUrl = `${publicBaseUrl}/uploads/${fileName}`;
     const imageUrlForDb = `/uploads/${fileName}`;
     const cleanImageUrlForDb = imageUrlForDb.replace(/["']/g, "");
 
-    // ===============================
-    // 🤖 STEP 3: Analyze Image
-    // ===============================
-    const analyzeResp = await axios.post(
-      `https://final-year-project-okg4.onrender.com/analyze`,
-      {
-        imageBase64: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
-      }
-    );
+    // ── Step 3: Analyze Image DIRECTLY (no internal HTTP call) ──
+    const report = await analyzeImageBuffer(imageBuffer, mimeType);
 
-    const report = analyzeResp.data.report;
+    // ── Step 4: Save to Database ──
+    console.log("[Incident] Attempting to insert:", {
+      incidentId: report.id,
+      from: from,
+      image: cleanImageUrlForDb,
+      pdf: `/reports/${report.id}.pdf`,
+      status: report.status,
+      confidence: report.confidence,
+      explanation: report.explanation,
+      location: {
+        latitude: saved.latitude,
+        longitude: saved.longitude,
+      },
+      notifiedAuthorities: HIGHER_AUTHORITIES,
+      reportedAt: new Date(),
+    });
 
-    // ===============================
-    // 💾 STEP 4: Save to Database
-    // ===============================
-   console.log("[Incident] Attempting to insert:", {
-        incidentId: report.id,
-        from: from,
-        image: cleanImageUrlForDb,
-        pdf: `/reports/${report.id}.pdf`,
-        status: report.status,
-        confidence: report.confidence,
-        explanation: report.explanation,
-        location: {
-          latitude: saved.latitude,
-          longitude: saved.longitude,
-        },
-        notifiedAuthorities: HIGHER_AUTHORITIES,
-        reportedAt: new Date(),
-      });
-      const insertedIncident = await Incident.create({
-        incidentId: report.id,
-        from: from,
-        image: cleanImageUrlForDb,
-        pdf: `/reports/${report.id}.pdf`,
-        status: report.status,
-        confidence: report.confidence,
-        explanation: report.explanation,
-        location: {
-          latitude: saved.latitude,
-          longitude: saved.longitude,
-        },
-        notifiedAuthorities: HIGHER_AUTHORITIES,
-        reportedAt: new Date(),
-      });
-      console.log("[Incident] Inserted:", insertedIncident);
+    const insertedIncident = await Incident.create({
+      incidentId: report.id,
+      from: from,
+      image: cleanImageUrlForDb,
+      pdf: `/reports/${report.id}.pdf`,
+      status: report.status,
+      confidence: report.confidence,
+      explanation: report.explanation,
+      location: {
+        latitude: saved.latitude,
+        longitude: saved.longitude,
+      },
+      notifiedAuthorities: HIGHER_AUTHORITIES,
+      reportedAt: new Date(),
+    });
 
-    // ===============================
-    // 🚨 STEP 5: If Suspicious → Notify Admin
-    // ===============================
+    console.log("[Incident] Inserted:", insertedIncident);
+
+    // ── Step 5: If Suspicious → Notify Authorities ──
     if (report.status === "SUSPICIOUS") {
       for (const number of HIGHER_AUTHORITIES) {
         await twilio.messages.create({
           from: `whatsapp:${TWILIO_PHONE_NUMBER}`,
           to: `whatsapp:${number}`,
-          body: `🚨 VIOLENCE DETECTED
-From: ${from}
-Confidence: ${report.confidence}%
-
-${locationText}
-
-${report.explanation}`,
+          body: `🚨 VIOLENCE DETECTED\nFrom: ${from}\nConfidence: ${report.confidence}%\n\n${locationText}\n\n${report.explanation}`,
           mediaUrl: [publicImageUrl],
         });
       }
@@ -985,15 +781,12 @@ ${report.explanation}`,
       `);
     }
 
-    // ===============================
-    // 🟢 If NOT Suspicious
-    // ===============================
+    // ── Not Suspicious ──
     return res.send(`
       <Response>
         <Message>✅ Image analyzed. No suspicious activity detected.</Message>
       </Response>
     `);
-
   } catch (err) {
     console.error("Twilio Webhook Error:", err);
 
@@ -1005,10 +798,8 @@ ${report.explanation}`,
   }
 });
 
-
-
 // ===============================
-// 🚀 START
+// 🚀 START SERVER
 // ===============================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
